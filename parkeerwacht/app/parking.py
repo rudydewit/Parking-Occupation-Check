@@ -30,6 +30,27 @@ class Reading:
     vehicles: List[Vehicle]
 
 
+def read_stream_frame(stream, skip: int = 1, max_bytes: int = 20_000_000) -> bytes:
+    """Leest een JPEG uit een MJPEG-stream; het eerste beeld kan nog onvolledig zijn."""
+    buffer = b""
+    total = 0
+    while total <= max_bytes:
+        start = buffer.find(b"\xff\xd8")
+        end = buffer.find(b"\xff\xd9", start + 2) if start >= 0 else -1
+        if end >= 0:
+            if skip == 0:
+                return buffer[start:end + 2]
+            skip -= 1
+            buffer = buffer[end + 2:]
+            continue
+        chunk = stream.read1(65536)
+        if not chunk:
+            raise ValueError("stream stopte zonder compleet beeld")
+        buffer += chunk
+        total += len(chunk)
+    raise ValueError("geen compleet beeld in de stream gevonden")
+
+
 def validate_zone(points) -> List[List[float]]:
     if not isinstance(points, list) or not 3 <= len(points) <= 12:
         raise ValueError("een vak heeft 3 tot 12 hoekpunten")

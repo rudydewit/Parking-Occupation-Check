@@ -6,14 +6,14 @@ voor de deur vrij is, zodat je weet of de auto aan huis kan laden.
 Gemaakt voor een Tapo C325WB, maar elke `camera.*`-entiteit in Home Assistant die
 snapshots levert zou moeten werken.
 
-> **Status: 0.1.0, nog niet op een echte Home Assistant getest.** Getest is alleen
-> op een Mac, met een nagebootste Supervisor en MQTT en twee snapshots overdag.
-> Nog niet getest: de Docker-build, de echte MQTT-koppeling, de snelheid op een
-> Raspberry Pi, een echt leeg vak en nachtbeelden.
+> **Status: vroege versie.** Draait op een Raspberry Pi 4 met Home Assistant OS,
+> met een herkenning van ongeveer 0,7 s per beeld en ongeveer 125 MB geheugen. Nog
+> niet getest: een echt leeg vak en nachtbeelden.
 
 ## Hoe het werkt
 
-1. Elke 60 seconden haalt de add-on een snapshot op via Home Assistant.
+1. Elke 60 seconden haalt de add-on een vers beeld uit de MJPEG-stream van Home
+   Assistant. De gewone snapshot kan bij sommige camera's minuten oud zijn.
 2. YOLOX-Tiny herkent lokaal voertuigen. Er gaan geen beelden naar buiten.
 3. Bedekt een voertuig minstens 50% van het vak, dan telt de meting als bezet.
 4. De status wisselt pas na 2 metingen op rij naar bezet en na 3 op rij naar vrij.
@@ -38,7 +38,8 @@ de status niet.
    `https://github.com/rudydewit/Parking-Occupation-Check`
 3. Installeer **Parkeerwacht**. De eerste build op een Raspberry Pi kan even duren.
 4. Controleer op het tabblad **Configuratie** de `camera_entity`.
-5. Start de add-on en kijk in het logboek of de controles lukken.
+5. Zet op het tabblad **Info** *Toon in zijbalk* en *Watchdog* aan.
+6. Start de add-on en kijk in het logboek of de controles lukken.
 
 De repository moet hiervoor openbaar zijn. Bij een privérepository gebruik je de
 lokale installatie.
@@ -48,7 +49,7 @@ lokale installatie.
 1. Kopieer de map `parkeerwacht` naar de share `addons`
    (`smb://homeassistant.local/addons`).
 2. Kies in de Add-on store **⋮ > Controleren op updates**.
-3. Installeer Parkeerwacht onder **Lokale add-ons** en volg daarna stap 4 en 5 hierboven.
+3. Installeer Parkeerwacht onder **Lokale add-ons** en volg daarna stap 4 tot en met 6 hierboven.
 
 ## Vak instellen
 
@@ -70,6 +71,7 @@ De namen volgen uit de MQTT-discovery; controleer ze na installatie.
 | Optie | Standaard | Betekenis |
 |---|---|---|
 | `camera_entity` | `camera.tapo_woning_voor_live_view` | Camera die bekeken wordt |
+| `core_url` | `http://homeassistant:8123` | Intern adres van Home Assistant; pas aan bij een andere poort |
 | `interval_seconds` | `60` | Tijd tussen controles (15-600) |
 | `min_confidence` | `0.35` | Minimale zekerheid van de herkenning |
 | `min_coverage` | `0.5` | Deel van het vak dat bedekt moet zijn |

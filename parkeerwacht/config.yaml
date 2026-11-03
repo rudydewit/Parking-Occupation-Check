@@ -1,5 +1,5 @@
 name: Parkeerwacht
-version: "0.1.1"
+version: "0.1.2"
 slug: parkeerwacht
 description: Ziet via de camera of de parkeerplek voor de deur vrij of bezet is
 arch:
@@ -18,6 +18,7 @@ panel_icon: mdi:car-electric
 panel_title: Parkeerwacht
 options:
   camera_entity: camera.tapo_woning_voor_live_view
+  core_url: http://homeassistant:8123
   interval_seconds: 60
   min_confidence: 0.35
   min_coverage: 0.5
@@ -25,6 +26,7 @@ options:
   confirm_free: 3
 schema:
   camera_entity: str
+  core_url: url
   interval_seconds: int(15,600)
   min_confidence: float(0.1,0.95)
   min_coverage: float(0.2,0.95)

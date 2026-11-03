@@ -20,6 +20,7 @@ op de grond rondom de plek waar een auto staat.
 | Optie | Standaard | Uitleg |
 |---|---|---|
 | `camera_entity` | `camera.tapo_woning_voor_live_view` | Camera in Home Assistant |
+| `core_url` | `http://homeassistant:8123` | Intern adres van Home Assistant |
 | `interval_seconds` | `60` | Tijd tussen twee controles |
 | `min_confidence` | `0.35` | Hoe zeker het model moet zijn dat het een voertuig is |
 | `min_coverage` | `0.5` | Welk deel van het vak een voertuig moet bedekken |

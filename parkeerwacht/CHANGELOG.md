@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Elke controle gebruikt nu een vers camerabeeld via de MJPEG-stream. De snapshot
+  van de TP-Link-koppeling is tot 5 minuten oud, waardoor metingen op rij vaak
+  hetzelfde beeld waren.
+- Nieuwe optie `core_url`.
+
 ## 0.1.1
 
 - Pakketten vastgezet op de versies waarmee de herkenning getest is.

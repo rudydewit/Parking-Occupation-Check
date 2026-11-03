@@ -1,7 +1,11 @@
 """Draaien met: python -m unittest discover -s tests (met app/ op het pad)."""
+import io
 import os
 import sys
+import threading
 import unittest
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
@@ -15,9 +19,66 @@ from parking import (  # noqa: E402
     Detector,
     OccupancyTracker,
     box_coverage,
+    read_stream_frame,
     validate_zone,
     zone_mask,
 )
+
+
+def part(frame: bytes) -> bytes:
+    return b"--ffmpeg\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+
+
+FIRST, SECOND = b"\xff\xd8first\xff\xd9", b"\xff\xd8second\xff\xd9"
+
+
+class StreamFrameTests(unittest.TestCase):
+    def test_skips_first_frame(self):
+        self.assertEqual(read_stream_frame(io.BytesIO(part(FIRST) + part(SECOND))), SECOND)
+
+    def test_can_return_first_frame(self):
+        self.assertEqual(read_stream_frame(io.BytesIO(part(FIRST)), skip=0), FIRST)
+
+    def test_frame_split_over_reads(self):
+        class OneByte(io.BytesIO):
+            def read1(self, size=-1):
+                return super().read1(1)
+
+        self.assertEqual(read_stream_frame(OneByte(part(FIRST) + part(SECOND))), SECOND)
+
+    def test_incomplete_stream_fails(self):
+        with self.assertRaises(ValueError):
+            read_stream_frame(io.BytesIO(part(FIRST) + b"\xff\xd8half"))
+
+    def test_stream_without_frame_end_stops_at_limit(self):
+        with self.assertRaises(ValueError):
+            read_stream_frame(io.BytesIO(b"\xff\xd8" + b"x" * 500), max_bytes=100)
+
+    def test_endless_http_stream_returns_and_closes(self):
+        closed = threading.Event()
+
+        class Endless(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "multipart/x-mixed-replace;boundary=ffmpeg")
+                self.end_headers()
+                try:
+                    while True:
+                        self.wfile.write(part(SECOND))
+                        self.wfile.flush()
+                except OSError:
+                    closed.set()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Endless)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as stream:
+            self.assertEqual(read_stream_frame(stream), SECOND)
+        self.assertTrue(closed.wait(5), "de stream moet na het lezen sluiten")
 
 
 class TrackerTests(unittest.TestCase):

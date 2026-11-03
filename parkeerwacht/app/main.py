@@ -1,4 +1,4 @@
-"""Parkeerwacht: haalt snapshots op, bepaalt de status en meldt die via MQTT."""
+"""Parkeerwacht: haalt camerabeelden op, bepaalt de status en meldt die via MQTT."""
 from __future__ import annotations
 
 import io
@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -14,7 +15,7 @@ import paho.mqtt.client as mqtt
 from PIL import Image
 
 import web
-from parking import DEFAULT_ZONE, Detector, OccupancyTracker, annotate, validate_zone
+from parking import DEFAULT_ZONE, Detector, OccupancyTracker, annotate, read_stream_frame, validate_zone
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -156,8 +157,13 @@ class Mqtt:
         self.client.publish(topic, payload, retain=True)
 
 
-def fetch_image(camera: str) -> tuple:
-    raw = supervisor_get(f"/core/api/camera_proxy/{camera}")
+def fetch_image(camera: str, core_url: str) -> tuple:
+    # camera_proxy kan een oud beeld geven (TP-Link: tot 5 minuten), de stream niet.
+    # Niet via de Supervisor: die leest een antwoord eerst helemaal in, en deze stream stopt nooit.
+    state = json.loads(supervisor_get(f"/core/api/states/{camera}"))
+    token = urllib.parse.quote(state["attributes"]["access_token"])
+    with urllib.request.urlopen(f"{core_url}/api/camera_proxy_stream/{camera}?token={token}", timeout=30) as stream:
+        raw = read_stream_frame(stream)
     return Image.open(io.BytesIO(raw)).convert("RGB"), raw
 
 
@@ -184,8 +190,10 @@ def run() -> None:
     while True:
         started = time.monotonic()
         try:
-            image, raw = fetch_image(options["camera_entity"])
+            image, raw = fetch_image(options["camera_entity"], options["core_url"])
             with shared.lock:
+                if raw == shared.raw_jpeg:
+                    raise ValueError("camera geeft hetzelfde beeld als de vorige keer")
                 zone = shared.zone
                 if shared.zone_changed:
                     shared.zone_changed = False
@@ -195,7 +203,7 @@ def run() -> None:
             checks += 1
             if checks <= 5 or checks % 60 == 0:
                 log.info(
-                    "Controle %s: snapshot %.1f s, herkenning %.2f s, dekking %.0f%%",
+                    "Controle %s: camerabeeld %.1f s, herkenning %.2f s, dekking %.0f%%",
                     checks, detect_started - started, time.monotonic() - detect_started, reading.coverage * 100,
                 )
             changed = tracker.update(reading.occupied)
