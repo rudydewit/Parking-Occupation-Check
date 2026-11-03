@@ -15,7 +15,7 @@ import paho.mqtt.client as mqtt
 from PIL import Image
 
 import web
-from parking import DEFAULT_ZONE, Detector, OccupancyTracker, annotate, read_stream_frame, validate_zone
+from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, read_stream_frame
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -38,33 +38,17 @@ def supervisor_get(path: str) -> bytes:
 class Shared:
     """Gedeelde stand tussen de meetlus en de webpagina."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, min_free: float):
         self.lock = threading.Lock()
-        self.wake = threading.Event()
-        self.zone_file = data_dir / "zone.json"
         self.history_dir = data_dir / "history"
         self.history_dir.mkdir(parents=True, exist_ok=True)
-        self.zone = self._load_zone()
-        self.zone_changed = False
+        self.min_free = min_free
         self.occupied = None
-        self.coverage = 0.0
+        self.free = 0.0
         self.last_check = 0
         self.error = None
         self.raw_jpeg = None
         self.annotated_jpeg = None
-
-    def _load_zone(self):
-        try:
-            return validate_zone(json.loads(self.zone_file.read_text()))
-        except (OSError, ValueError):
-            return DEFAULT_ZONE
-
-    def set_zone(self, zone) -> None:
-        with self.lock:
-            self.zone = zone
-            self.zone_changed = True
-        self.zone_file.write_text(json.dumps(zone))
-        self.wake.set()
 
     def history_photo(self, photo_id: str):
         path = self.history_dir / f"{photo_id}.jpg"
@@ -88,10 +72,10 @@ class Shared:
         with self.lock:
             return {
                 "occupied": self.occupied,
-                "coverage": self.coverage,
+                "free": self.free,
+                "min_free": self.min_free,
                 "last_check": self.last_check,
                 "error": self.error,
-                "zone": self.zone,
                 "history": history,
             }
 
@@ -176,7 +160,11 @@ def to_jpeg(image: Image.Image) -> bytes:
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     options = json.loads((DATA / "options.json").read_text())
-    shared = Shared(DATA)
+    if options["zone_start_m"] >= options["zone_end_m"]:
+        raise ValueError("zone_start_m moet kleiner zijn dan zone_end_m")
+    zone = ChargeZone(options["zone_start_m"], options["zone_end_m"], options["min_free_m"])
+    ruler = KerbRuler(options["tile_size_m"])
+    shared = Shared(DATA, zone.min_free)
     threading.Thread(target=web.serve, args=(shared,), daemon=True).start()
 
     detector = Detector("yolox_tiny.onnx")
@@ -194,23 +182,19 @@ def run() -> None:
             with shared.lock:
                 if raw == shared.raw_jpeg:
                     raise ValueError("camera geeft hetzelfde beeld als de vorige keer")
-                zone = shared.zone
-                if shared.zone_changed:
-                    shared.zone_changed = False
-                    tracker.reset()
             detect_started = time.monotonic()
-            reading = detector.read(image, zone, options["min_confidence"], options["min_coverage"])
+            reading = detector.read(image, ruler, zone, options["min_confidence"])
             checks += 1
             if checks <= 5 or checks % 60 == 0:
                 log.info(
-                    "Controle %s: camerabeeld %.1f s, herkenning %.2f s, dekking %.0f%%",
-                    checks, detect_started - started, time.monotonic() - detect_started, reading.coverage * 100,
+                    "Controle %s: camerabeeld %.1f s, herkenning %.2f s, vrij %.1f m",
+                    checks, detect_started - started, time.monotonic() - detect_started, reading.free,
                 )
             changed = tracker.update(reading.occupied)
-            annotated = to_jpeg(annotate(image, zone, reading, options["min_coverage"]))
+            annotated = to_jpeg(annotate(image, ruler, zone, reading))
             with shared.lock:
                 shared.occupied = tracker.state
-                shared.coverage = reading.coverage
+                shared.free = reading.free
                 shared.last_check = int(time.time())
                 shared.error = None if reading.occupied is not None else "Beeld te donker om te beoordelen"
                 shared.raw_jpeg = raw
@@ -218,13 +202,13 @@ def run() -> None:
             failures = 0
             broker.publish(STATUS_TOPIC, "online")
             if changed:
-                log.info("Status: %s (dekking %.0f%%)", "bezet" if tracker.state else "vrij", reading.coverage * 100)
+                log.info("Status: %s (vrij %.1f m)", "bezet" if tracker.state else "vrij", reading.free)
                 shared.add_history(tracker.state, annotated)
                 broker.publish(STATE_TOPIC, "ON" if tracker.state else "OFF")
                 broker.publish(PHOTO_TOPIC, annotated)
             # Alleen bij echte veranderingen, om de HA-database niet te vullen
-            attributes = {"dekking_procent": round(reading.coverage * 20) * 5}
-            if attributes != attributes_sent:
+            attributes = {"vrije_ruimte_meter": round(reading.free * 2) / 2}
+            if reading.occupied is not None and attributes != attributes_sent:
                 broker.publish(ATTRIBUTES_TOPIC, json.dumps(attributes))
                 attributes_sent = attributes
         except Exception as err:  # meetlus moet blijven draaien, ook als de camera wegvalt
@@ -237,8 +221,7 @@ def run() -> None:
                     shared.error = "Geen camerabeeld"
                     shared.occupied = None
                 tracker.reset()
-        shared.wake.wait(max(1.0, options["interval_seconds"] - (time.monotonic() - started)))
-        shared.wake.clear()
+        time.sleep(max(1.0, options["interval_seconds"] - (time.monotonic() - started)))
 
 
 if __name__ == "__main__":

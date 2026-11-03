@@ -1,12 +1,10 @@
-"""Webpagina via Ingress: status bekijken, vak tekenen, foto's van wisselingen."""
+"""Webpagina via Ingress: status bekijken, foto's van wisselingen."""
 from __future__ import annotations
 
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
-from parking import validate_zone
 
 HTML = (Path(__file__).parent / "index.html").read_bytes()
 INGRESS_PROXY = "172.30.32.2"
@@ -46,26 +44,10 @@ def serve(shared, port: int = 8099, allowed=(INGRESS_PROXY,), host: str = "0.0.0
                 return self._json(shared.state_dict())
             if path == "/api/annotated.jpg":
                 return self._jpeg(shared.annotated_jpeg)
-            if path == "/api/raw.jpg":
-                return self._jpeg(shared.raw_jpeg)
             match = re.fullmatch(r"/api/history/(\d+)\.jpg", path)
             if match:
                 return self._jpeg(shared.history_photo(match.group(1)))
             self._send(b"", "text/plain", 404)
-
-        def do_POST(self):
-            if self.client_address[0] not in allowed:
-                return self._send(b"", "text/plain", 403)
-            if self.path.split("?", 1)[0] != "/api/zone":
-                return self._send(b"", "text/plain", 404)
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                if length > 4096:
-                    raise ValueError("te veel gegevens")
-                shared.set_zone(validate_zone(json.loads(self.rfile.read(length))["points"]))
-            except (ValueError, KeyError, TypeError) as err:
-                return self._json({"error": str(err)}, 400)
-            self._json({"ok": True})
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.serve_forever()

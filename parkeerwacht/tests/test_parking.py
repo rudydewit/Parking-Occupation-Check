@@ -15,13 +15,12 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 from PIL import Image  # noqa: E402
 
 from parking import (  # noqa: E402
-    DEFAULT_ZONE,
+    ChargeZone,
     Detector,
+    KerbRuler,
     OccupancyTracker,
-    box_coverage,
+    largest_gap,
     read_stream_frame,
-    validate_zone,
-    zone_mask,
 )
 
 
@@ -120,22 +119,73 @@ class TrackerTests(unittest.TestCase):
         self.assertIsNone(self.tracker.state)
 
 
-class ZoneTests(unittest.TestCase):
-    def test_accepts_default_zone(self):
-        self.assertEqual(validate_zone(DEFAULT_ZONE), DEFAULT_ZONE)
+ZONE = ChargeZone(2.2, 12.1, 4.5)  # de standaardinstellingen
 
-    def test_rejects_bad_zones(self):
-        for bad in ("x", [], [[0, 0], [1, 1]], [[0, 0], [1, 1], [2, 0]], [[0, 0], [1, 1], ["a", 0]],
-                    [[0, 0], [1, 1], [True, 0]], [[0, 0]] * 13):
-            with self.assertRaises(ValueError):
-                validate_zone(bad)
 
-    def test_coverage(self):
-        mask = zone_mask([[0, 0], [0.5, 0], [0.5, 1], [0, 1]], 100, 100)
-        self.assertAlmostEqual(box_coverage((0, 0, 100, 100), mask), 1.0, places=1)
-        self.assertAlmostEqual(box_coverage((0, 0, 25, 100), mask), 0.5, places=1)
-        self.assertEqual(box_coverage((60, 0, 100, 100), mask), 0.0)
-        self.assertEqual(box_coverage((-50, -50, -10, -10), mask), 0.0)
+class RulerTests(unittest.TestCase):
+    # Afgelezen voegen langs de stoeprand: tegelnummer en plek op de rand na lenscorrectie
+    JOINTS = {0: -504, 3: -270, 6: -102, 9: 23, 12: 116, 15: 191, 18: 254}
+
+    def setUp(self):
+        self.ruler = KerbRuler(0.30)
+
+    def test_joints_lie_one_tile_apart(self):
+        for tile, along in self.JOINTS.items():
+            self.assertAlmostEqual(float(self.ruler.metres(along)), (tile + 3.777) * 0.30, delta=0.03)
+
+    def test_frame_bottom_is_zero(self):
+        along = (self.ruler.undistort((57.0, 720.0)) - np.array([394.824, 362.381])) @ np.array([0.77772, -0.628611])
+        self.assertAlmostEqual(float(self.ruler.metres(along)), 0.0, delta=0.02)
+
+    def test_lens_correction_round_trip(self):
+        for point in ((57.0, 720.0), (640.0, 360.0), (1000.0, 100.0)):
+            np.testing.assert_allclose(self.ruler.distort(self.ruler.undistort(point)), point, atol=1e-6)
+
+    def test_kerb_pixels_stay_on_the_kerb(self):
+        start, end = self.ruler.kerb_pixels(0.0, 5.0, steps=2)
+        self.assertAlmostEqual(start[0], 57, delta=3)
+        self.assertAlmostEqual(start[1], 720, delta=3)
+        self.assertLess(end[1], start[1])
+
+    def test_car_against_the_kerb_gets_a_span(self):
+        front, rear = self.ruler.span((249, 79, 587, 353))  # Twingo
+        self.assertAlmostEqual(front, 3.1, delta=0.2)
+        self.assertAlmostEqual(rear, 6.6, delta=0.3)
+
+    def test_car_across_the_street_is_ignored(self):
+        self.assertIsNone(self.ruler.span((82, 108, 348, 269)))
+
+    def test_car_cut_off_by_the_frame_reaches_past_the_edge(self):
+        front, rear = self.ruler.span((0, 381, 185, 687))
+        self.assertEqual(front, -np.inf)
+        self.assertGreater(rear, 0.5)
+
+    def test_tile_size_scales_the_distances(self):
+        small, large = KerbRuler(0.30).span((249, 79, 587, 353))[1], KerbRuler(0.33).span((249, 79, 587, 353))[1]
+        self.assertAlmostEqual(large / small, 1.1, places=5)
+
+
+class GapTests(unittest.TestCase):
+    def test_empty_zone_is_all_free(self):
+        self.assertEqual(largest_gap([], ZONE), (2.2, 12.1))
+
+    def test_finds_the_largest_stretch(self):
+        self.assertEqual(largest_gap([(3.0, 6.0), (7.0, 11.0)], ZONE), (11.0, 12.1))
+        self.assertEqual(largest_gap([(8.0, 9.0)], ZONE), (2.2, 8.0))
+
+    def test_cars_outside_the_zone_do_not_count(self):
+        self.assertEqual(largest_gap([(0.0, 1.0), (13.0, 16.0)], ZONE), (2.2, 12.1))
+
+    def test_car_over_the_zone_edge_takes_its_part(self):
+        self.assertEqual(largest_gap([(-np.inf, 4.0)], ZONE), (4.0, 12.1))
+        self.assertEqual(largest_gap([(9.0, 20.0)], ZONE), (2.2, 9.0))
+
+    def test_overlapping_boxes_leave_no_gap(self):
+        self.assertEqual(largest_gap([(3.0, 8.0), (5.0, 6.0)], ChargeZone(3.0, 8.0, 4.5)), (3.0, 3.0))
+
+    def test_full_zone_has_no_free_length(self):
+        gap = largest_gap([(0.0, 20.0)], ZONE)
+        self.assertEqual(gap[1] - gap[0], 0.0)
 
 
 MODEL = os.environ.get("PARKEERWACHT_MODEL")
@@ -144,30 +194,37 @@ SNAPSHOTS = os.environ.get("PARKEERWACHT_SNAPSHOTS", "").split(",")
 
 @unittest.skipUnless(MODEL, "PARKEERWACHT_MODEL niet gezet")
 class RealImageTests(unittest.TestCase):
-    """Echte snapshots waarop de Twingo in vak B staat en vak A leeg is."""
-
-    ZONE_A = [[0.0156, 0.9722], [0.2773, 0.5486], [0.0938, 0.4444], [0, 0.5486], [0, 0.9722]]
+    """Echte snapshots met twee auto's in de laadzone en een auto aan de overkant."""
 
     @classmethod
     def setUpClass(cls):
         cls.detector = Detector(MODEL)
+        cls.ruler = KerbRuler(0.30)
 
-    def test_bay_b_is_occupied(self):
+    def readings(self, ruler=None):
         for path in SNAPSHOTS:
-            reading = self.detector.read(Image.open(path).convert("RGB"), DEFAULT_ZONE, 0.35, 0.5)
+            yield path, self.detector.read(Image.open(path).convert("RGB"), ruler or self.ruler, ZONE, 0.35)
+
+    def test_two_parked_cars_mean_occupied(self):
+        for path, reading in self.readings():
             self.assertTrue(reading.occupied, path)
-            self.assertGreater(reading.coverage, 0.9)
-            neighbours = sorted(v.coverage for v in reading.vehicles)[:-1]
-            self.assertLess(max(neighbours), 0.5, "buurauto mag het vak niet bezet maken")
+            self.assertLess(reading.free, 1.5, path)
 
-    def test_empty_bay_a_is_free(self):
-        for path in SNAPSHOTS:
-            reading = self.detector.read(Image.open(path).convert("RGB"), self.ZONE_A, 0.35, 0.5)
-            self.assertFalse(reading.occupied, path)
+    def test_car_across_the_street_does_not_count(self):
+        for path, reading in self.readings():
+            self.assertEqual(sum(1 for v in reading.vehicles if v.span and v.span[0] < ZONE.end), 2, path)
+
+    def test_one_car_gone_means_free_at_either_tile_size(self):
+        for size in (0.30, 0.32):
+            for path, reading in self.readings(KerbRuler(size)):
+                spans = sorted(v.span for v in reading.vehicles if v.span and v.span[0] < ZONE.end)
+                for left in spans:
+                    gap = largest_gap([left], ZONE)
+                    self.assertGreaterEqual(gap[1] - gap[0], ZONE.min_free, f"{path} tegel {size}")
 
     def test_black_image_is_not_judged_as_free(self):
         black = Image.fromarray(np.zeros((720, 1280, 3), dtype=np.uint8))
-        self.assertIsNone(self.detector.read(black, DEFAULT_ZONE, 0.35, 0.5).occupied)
+        self.assertIsNone(self.detector.read(black, self.ruler, ZONE, 0.35).occupied)
 
 
 if __name__ == "__main__":

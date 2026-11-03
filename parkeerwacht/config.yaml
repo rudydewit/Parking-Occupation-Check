@@ -1,7 +1,7 @@
 name: Parkeerwacht
-version: "0.1.2"
+version: "0.2.0"
 slug: parkeerwacht
-description: Ziet via de camera of de parkeerplek voor de deur vrij of bezet is
+description: Ziet via de camera of er voor de deur plek is om te parkeren en te laden
 arch:
   - aarch64
   - amd64
@@ -21,7 +21,10 @@ options:
   core_url: http://homeassistant:8123
   interval_seconds: 60
   min_confidence: 0.35
-  min_coverage: 0.5
+  tile_size_m: 0.3
+  zone_start_m: 2.2
+  zone_end_m: 12.1
+  min_free_m: 4.5
   confirm_occupied: 2
   confirm_free: 3
 schema:
@@ -29,6 +32,9 @@ schema:
   core_url: url
   interval_seconds: int(15,600)
   min_confidence: float(0.1,0.95)
-  min_coverage: float(0.2,0.95)
+  tile_size_m: float(0.1,1)
+  zone_start_m: float(0,30)
+  zone_end_m: float(0,30)
+  min_free_m: float(1,15)
   confirm_occupied: int(1,10)
   confirm_free: int(1,10)

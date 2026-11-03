@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Parkeerwacht</title>
 <style>
-  :root { --bg:#f5f5f5; --card:#fff; --text:#1c1c1c; --muted:#666; --free:#1b8a4b; --busy:#c8362b; --unknown:#777; --accent:#03a9f4; }
+  :root { --bg:#f5f5f5; --card:#fff; --text:#1c1c1c; --muted:#666; --free:#1b8a4b; --busy:#c8362b; --unknown:#777; }
   @media (prefers-color-scheme: dark) { :root { --bg:#111; --card:#1d1d1d; --text:#eee; --muted:#aaa; } }
   * { box-sizing:border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--text); font:16px/1.45 system-ui,sans-serif; }
@@ -17,15 +17,8 @@
   #status.free { background:var(--free); }
   #status.busy { background:var(--busy); }
   #status p { margin:4px 0 0; }
-  .frame { position:relative; line-height:0; }
+  .frame { line-height:0; }
   .frame img { width:100%; border-radius:8px; background:#333; min-height:120px; }
-  svg { position:absolute; inset:0; width:100%; height:100%; display:none; }
-  .editing svg { display:block; cursor:crosshair; }
-  polygon { fill:rgba(3,169,244,.25); stroke:var(--accent); stroke-width:3; vector-effect:non-scaling-stroke; }
-  .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
-  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--muted); background:transparent; color:inherit; cursor:pointer; }
-  button:disabled { opacity:.45; cursor:default; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   .hint, .muted { color:var(--muted); font-size:.9rem; }
   #history { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
   #history a { color:inherit; text-decoration:none; font-size:.85rem; }
@@ -40,17 +33,10 @@
   </section>
   <section>
     <h2>Camerabeeld</h2>
-    <div class="frame" id="frame">
-      <img id="photo" alt="Laatste camerabeeld met het parkeervak">
-      <svg id="canvas" viewBox="0 0 1 1" preserveAspectRatio="none"><polygon id="shape"></polygon></svg>
+    <div class="frame">
+      <img id="photo" alt="Laatste camerabeeld met de laadzone langs de stoeprand">
     </div>
-    <p class="hint" id="hint" hidden>Klik de hoeken van het vak aan, op de grond rondom de plek waar een auto staat.</p>
-    <div class="buttons">
-      <button id="edit">Vak opnieuw tekenen</button>
-      <button id="save" class="primary" hidden disabled>Opslaan</button>
-      <button id="undo" hidden disabled>Punt terug</button>
-      <button id="cancel" hidden>Annuleren</button>
-    </div>
+    <p class="hint">Rode lijn: laadzone langs de stoeprand. Groene lijn: grootste vrije stuk daarin.</p>
     <p class="muted" id="last"></p>
   </section>
   <section>
@@ -61,30 +47,14 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let editing = false, points = [], stamp = 0;
+let stamp = 0;
 
 function time(epoch) {
   return new Date(epoch * 1000).toLocaleString("nl-NL", { weekday:"short", hour:"2-digit", minute:"2-digit" });
 }
 
-function showPhoto() {
-  $("photo").src = (editing ? "api/raw.jpg" : "api/annotated.jpg") + "?t=" + stamp;
-}
-
-function drawShape() {
-  $("shape").setAttribute("points", points.map(p => p.join(",")).join(" "));
-  $("save").disabled = points.length < 3;
-  $("undo").disabled = points.length === 0;
-}
-
-function setEditing(on) {
-  editing = on;
-  points = [];
-  $("frame").classList.toggle("editing", on);
-  ["save", "undo", "cancel", "hint"].forEach(id => { $(id).hidden = !on; });
-  $("edit").hidden = on;
-  drawShape();
-  showPhoto();
+function metres(value) {
+  return value.toLocaleString("nl-NL", { minimumFractionDigits:1, maximumFractionDigits:1 }) + " m";
 }
 
 async function refresh() {
@@ -96,9 +66,9 @@ async function refresh() {
   $("title").textContent = state.occupied === false ? "Vrij: laden mogelijk"
     : state.occupied === true ? "Bezet" : "Status onbekend";
   $("detail").textContent = state.error ? state.error
-    : state.last_check ? "Vak voor " + Math.round(state.coverage * 100) + "% bedekt door een voertuig" : "Wacht op het eerste camerabeeld";
+    : state.last_check ? "Grootste vrije stuk: " + metres(state.free) + " (nodig: " + metres(state.min_free) + ")" : "Wacht op het eerste camerabeeld";
   $("last").textContent = state.last_check ? "Laatste controle: " + time(state.last_check) : "";
-  if (state.last_check !== stamp) { stamp = state.last_check; if (!editing) showPhoto(); }
+  if (state.last_check !== stamp) { stamp = state.last_check; $("photo").src = "api/annotated.jpg?t=" + stamp; }
   $("empty").hidden = state.history.length > 0;
   const list = $("history");
   list.replaceChildren(...state.history.map(item => {
@@ -114,23 +84,6 @@ async function refresh() {
   }));
 }
 
-$("edit").onclick = () => setEditing(true);
-$("cancel").onclick = () => setEditing(false);
-$("undo").onclick = () => { points.pop(); drawShape(); };
-$("canvas").addEventListener("click", event => {
-  const rect = $("canvas").getBoundingClientRect();
-  if (points.length >= 12) return;
-  points.push([(event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height]);
-  drawShape();
-});
-$("save").onclick = async () => {
-  const response = await fetch("api/zone", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ points }) });
-  if (!response.ok) { alert((await response.json()).error); return; }
-  setEditing(false);
-  // De meting met het nieuwe vak duurt even
-  setTimeout(refresh, 2000);
-  setTimeout(refresh, 5000);
-};
 refresh();
 setInterval(refresh, 10000);
 </script>
