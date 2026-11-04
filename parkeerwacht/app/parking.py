@@ -122,6 +122,14 @@ def read_stream_frame(stream, skip: int = 1, max_bytes: int = 20_000_000) -> byt
     raise ValueError("geen compleet beeld in de stream gevonden")
 
 
+def stream_token(state: dict) -> str:
+    """Token uit de status van een camera in Home Assistant; een onbeschikbare camera heeft er geen."""
+    token = state.get("attributes", {}).get("access_token")
+    if not token:
+        raise ValueError(f"camera niet beschikbaar (status: {state.get('state')})")
+    return token
+
+
 def largest_gap(spans: Sequence[Tuple[float, float]], zone: ChargeZone) -> Tuple[float, float]:
     """Grootste stuk van de zone waar geen auto staat; een lege lengte als alles vol staat."""
     position, best = zone.start, (zone.start, zone.start)

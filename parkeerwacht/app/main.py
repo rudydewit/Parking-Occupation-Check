@@ -15,7 +15,7 @@ import paho.mqtt.client as mqtt
 from PIL import Image
 
 import web
-from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, read_stream_frame
+from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, read_stream_frame, stream_token
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -145,7 +145,7 @@ def fetch_image(camera: str, core_url: str) -> tuple:
     # camera_proxy kan een oud beeld geven (TP-Link: tot 5 minuten), de stream niet.
     # Niet via de Supervisor: die leest een antwoord eerst helemaal in, en deze stream stopt nooit.
     state = json.loads(supervisor_get(f"/core/api/states/{camera}"))
-    token = urllib.parse.quote(state["attributes"]["access_token"])
+    token = urllib.parse.quote(stream_token(state))
     with urllib.request.urlopen(f"{core_url}/api/camera_proxy_stream/{camera}?token={token}", timeout=30) as stream:
         raw = read_stream_frame(stream)
     return Image.open(io.BytesIO(raw)).convert("RGB"), raw
@@ -171,6 +171,7 @@ def run() -> None:
     tracker = OccupancyTracker(options["confirm_occupied"], options["confirm_free"])
     broker = Mqtt()
     failures = 0
+    last_error = None
     checks = 0
     attributes_sent = None
     log.info("Gestart, camera %s, elke %s s", options["camera_entity"], options["interval_seconds"])
@@ -199,7 +200,10 @@ def run() -> None:
                 shared.error = None if reading.occupied is not None else "Beeld te donker om te beoordelen"
                 shared.raw_jpeg = raw
                 shared.annotated_jpeg = annotated
+            if failures:
+                log.info("Controle weer gelukt na %s mislukte pogingen", failures)
             failures = 0
+            last_error = None
             broker.publish(STATUS_TOPIC, "online")
             if changed:
                 log.info("Status: %s (vrij %.1f m)", "bezet" if tracker.state else "vrij", reading.free)
@@ -213,7 +217,9 @@ def run() -> None:
                 attributes_sent = attributes
         except Exception as err:  # meetlus moet blijven draaien, ook als de camera wegvalt
             failures += 1
-            log.warning("Controle mislukt (%s/%s): %s", failures, MAX_FAILURES, err)
+            if str(err) != last_error:  # een lange storing niet elke minuut opnieuw melden
+                log.warning("Controle mislukt: %s", err)
+                last_error = str(err)
             if failures >= MAX_FAILURES:
                 # Liever "niet beschikbaar" dan onterecht "vrij"
                 broker.publish(STATUS_TOPIC, "offline")

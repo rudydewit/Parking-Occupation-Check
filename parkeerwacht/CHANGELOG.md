@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Is de camera niet beschikbaar in Home Assistant, dan staat er nu "camera niet
+  beschikbaar" in het logboek in plaats van `'access_token'`.
+- Een storing komt nog maar één keer in het logboek, plus een regel zodra de
+  controles weer lukken.
+
 ## 0.2.0
 
 - Meet nu de vrije ruimte langs de stoeprand in plaats van een vast vak. Er staan

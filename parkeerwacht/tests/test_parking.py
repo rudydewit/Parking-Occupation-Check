@@ -21,6 +21,7 @@ from parking import (  # noqa: E402
     OccupancyTracker,
     largest_gap,
     read_stream_frame,
+    stream_token,
 )
 
 
@@ -78,6 +79,16 @@ class StreamFrameTests(unittest.TestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as stream:
             self.assertEqual(read_stream_frame(stream), SECOND)
         self.assertTrue(closed.wait(5), "de stream moet na het lezen sluiten")
+
+
+class StreamTokenTests(unittest.TestCase):
+    def test_returns_token_of_available_camera(self):
+        self.assertEqual(stream_token({"state": "idle", "attributes": {"access_token": "abc"}}), "abc")
+
+    def test_unavailable_camera_names_the_cause(self):
+        state = {"state": "unavailable", "attributes": {"friendly_name": "Live view"}}
+        with self.assertRaisesRegex(ValueError, "camera niet beschikbaar .*unavailable"):
+            stream_token(state)
 
 
 class TrackerTests(unittest.TestCase):

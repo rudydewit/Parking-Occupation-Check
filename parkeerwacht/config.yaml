@@ -1,5 +1,5 @@
 name: Parkeerwacht
-version: "0.2.0"
+version: "0.2.1"
 slug: parkeerwacht
 description: Ziet via de camera of er voor de deur plek is om te parkeren en te laden
 arch:

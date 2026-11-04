@@ -43,6 +43,7 @@ laatste wisselingen.
   afstand doorgerekend, dus minder nauwkeurig.
 - Bij een te donker beeld blijft de laatste status staan. Zonder camerabeeld wordt
   de sensor `unavailable`, nooit onterecht "vrij".
+- Een storing komt één keer in het logboek, met een regel zodra de controles weer lukken.
 - De laatste 50 wisselfoto's staan lokaal in de add-on en worden daarna overschreven.
   Ze tonen ook de straat en de buren, en gaan dus mee in je back-ups.
 
