@@ -101,25 +101,38 @@ class Reading:
     vehicles: List[Vehicle]
 
 
-def read_stream_frame(stream, skip: int = 1, max_bytes: int = 20_000_000) -> bytes:
-    """Leest een JPEG uit een MJPEG-stream; het eerste beeld kan nog onvolledig zijn."""
+def iter_stream_frames(stream, max_bytes: int = 20_000_000):
+    """Geeft de JPEG-beelden uit een MJPEG-stream, zolang de stream loopt.
+
+    max_bytes geldt per beeld: zoveel data zonder compleet beeld betekent een kapotte stream.
+    """
     buffer = b""
-    total = 0
-    while total <= max_bytes:
+    since_frame = 0
+    while True:
         start = buffer.find(b"\xff\xd8")
         end = buffer.find(b"\xff\xd9", start + 2) if start >= 0 else -1
         if end >= 0:
-            if skip == 0:
-                return buffer[start:end + 2]
-            skip -= 1
+            yield buffer[start:end + 2]
             buffer = buffer[end + 2:]
+            since_frame = 0
             continue
+        if since_frame > max_bytes:
+            raise ValueError("geen compleet beeld in de stream gevonden")
         chunk = stream.read1(65536)
         if not chunk:
             raise ValueError("stream stopte zonder compleet beeld")
-        buffer += chunk
-        total += len(chunk)
-    raise ValueError("geen compleet beeld in de stream gevonden")
+        # Alleen bewaren vanaf het begin van een beeld; rommel ervoor groeit anders mee
+        buffer = (buffer[start:] if start >= 0 else buffer[-1:]) + chunk
+        since_frame += len(chunk)
+
+
+def read_stream_frame(stream, skip: int = 1, max_bytes: int = 20_000_000) -> bytes:
+    """Leest een JPEG uit een MJPEG-stream; het eerste beeld kan nog onvolledig zijn."""
+    for frame in iter_stream_frames(stream, max_bytes):
+        if skip == 0:
+            return frame
+        skip -= 1
+    raise ValueError("stream stopte zonder compleet beeld")  # pragma: no cover
 
 
 def stream_token(state: dict) -> str:

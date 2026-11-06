@@ -43,7 +43,12 @@ laatste wisselingen.
   afstand doorgerekend, dus minder nauwkeurig.
 - Bij een te donker beeld blijft de laatste status staan. Zonder camerabeeld wordt
   de sensor `unavailable`, nooit onterecht "vrij".
-- Een storing komt één keer in het logboek, met een regel zodra de controles weer lukken.
+- De add-on houdt één verbinding met de camerastream open. Elke controle gebruikt
+  het nieuwste beeld daaruit. Valt de stream weg, dan volgt een nieuwe poging na
+  30 s, 1, 2, 4, 8 en 16 minuten en daarna elke 30 minuten. Elke poging staat in
+  het logboek, met een regel zodra de stream weer loopt.
+- Home Assistant zet het camerabeeld zolang de verbinding openstaat om naar MJPEG.
+  Dat kost wat rekenkracht van Home Assistant zelf.
 - De laatste 50 wisselfoto's staan lokaal in de add-on en worden daarna overschreven.
   Ze tonen ook de straat en de buren, en gaan dus mee in je back-ups.
 

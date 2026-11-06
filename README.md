@@ -17,8 +17,10 @@ bij die camerastand, dus op een andere plek moet je die opnieuw bepalen.
 Er staan geen vakken op straat, dus de add-on kijkt niet naar één vast vak maar naar
 de ruimte langs de stoeprand.
 
-1. Elke 60 seconden haalt de add-on een vers beeld uit de MJPEG-stream van Home
-   Assistant. De gewone snapshot kan bij sommige camera's minuten oud zijn.
+1. De add-on houdt één verbinding open met de MJPEG-stream van Home Assistant en
+   neemt elke 60 seconden het nieuwste beeld. De gewone snapshot kan bij sommige
+   camera's minuten oud zijn. Valt de stream weg, dan wacht de add-on steeds langer
+   (30 s tot 30 minuten) voor een nieuwe poging, zodat de camera niet vol raakt.
 2. YOLOX-Tiny herkent lokaal voertuigen. Er gaan geen beelden naar buiten.
 3. Een meetlat rekent elke auto tegen de stoeprand om naar een stuk stoeprand in
    meters. Die houdt rekening met de groothoeklens en het perspectief, en is

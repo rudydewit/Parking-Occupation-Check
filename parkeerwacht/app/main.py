@@ -15,12 +15,14 @@ import paho.mqtt.client as mqtt
 from PIL import Image
 
 import web
-from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, read_stream_frame, stream_token
+from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, stream_token
+from stream import StreamReader
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 HISTORY_LIMIT = 50
 MAX_FAILURES = 3
+MAX_FRAME_AGE = 30  # seconden; ouder beeld telt als geen beeld
 STATUS_TOPIC = "parkeerwacht/status"
 STATE_TOPIC = "parkeerwacht/bezet"
 ATTRIBUTES_TOPIC = "parkeerwacht/attributes"
@@ -141,14 +143,16 @@ class Mqtt:
         self.client.publish(topic, payload, retain=True)
 
 
-def fetch_image(camera: str, core_url: str) -> tuple:
-    # camera_proxy kan een oud beeld geven (TP-Link: tot 5 minuten), de stream niet.
-    # Niet via de Supervisor: die leest een antwoord eerst helemaal in, en deze stream stopt nooit.
+def open_camera_stream(camera: str, core_url: str):
+    """Opent de MJPEG-stream van de camera; de StreamReader houdt hem open.
+
+    camera_proxy kan een oud beeld geven (TP-Link: tot 5 minuten), de stream niet.
+    Niet via de Supervisor: die leest een antwoord eerst helemaal in, en deze stream stopt nooit.
+    De time-out geldt per leesactie: valt de stream 30 s stil, dan volgt een fout.
+    """
     state = json.loads(supervisor_get(f"/core/api/states/{camera}"))
     token = urllib.parse.quote(stream_token(state))
-    with urllib.request.urlopen(f"{core_url}/api/camera_proxy_stream/{camera}?token={token}", timeout=30) as stream:
-        raw = read_stream_frame(stream)
-    return Image.open(io.BytesIO(raw)).convert("RGB"), raw
+    return urllib.request.urlopen(f"{core_url}/api/camera_proxy_stream/{camera}?token={token}", timeout=30)
 
 
 def to_jpeg(image: Image.Image) -> bytes:
@@ -170,6 +174,12 @@ def run() -> None:
     detector = Detector("yolox_tiny.onnx")
     tracker = OccupancyTracker(options["confirm_occupied"], options["confirm_free"])
     broker = Mqtt()
+    reader = StreamReader(lambda: open_camera_stream(options["camera_entity"], options["core_url"])).start()
+    used_frame_time = 0.0
+    for _ in range(30):  # eerste beeld afwachten, anders begint de eerste controle met een fout
+        if reader.latest()[0] is not None:
+            break
+        time.sleep(1)
     failures = 0
     last_error = None
     checks = 0
@@ -179,17 +189,23 @@ def run() -> None:
     while True:
         started = time.monotonic()
         try:
-            image, raw = fetch_image(options["camera_entity"], options["core_url"])
+            raw, frame_time = reader.latest()
+            age = time.monotonic() - frame_time
+            if raw is None or frame_time <= used_frame_time or age > MAX_FRAME_AGE:
+                raise ValueError(f"geen nieuw camerabeeld ({reader.error or 'stream levert niets'})")
+            used_frame_time = frame_time
             with shared.lock:
                 if raw == shared.raw_jpeg:
+                    reader.reconnect()
                     raise ValueError("camera geeft hetzelfde beeld als de vorige keer")
+            image = Image.open(io.BytesIO(raw)).convert("RGB")
             detect_started = time.monotonic()
             reading = detector.read(image, ruler, zone, options["min_confidence"])
             checks += 1
             if checks <= 5 or checks % 60 == 0:
                 log.info(
-                    "Controle %s: camerabeeld %.1f s, herkenning %.2f s, vrij %.1f m",
-                    checks, detect_started - started, time.monotonic() - detect_started, reading.free,
+                    "Controle %s: beeld %.1f s oud, herkenning %.2f s, vrij %.1f m",
+                    checks, age, time.monotonic() - detect_started, reading.free,
                 )
             changed = tracker.update(reading.occupied)
             annotated = to_jpeg(annotate(image, ruler, zone, reading))
