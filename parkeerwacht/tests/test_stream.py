@@ -1,14 +1,13 @@
 """Draaien met: python -m unittest discover -s tests (met app/ op het pad)."""
 import io
 import sys
-import threading
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 
 from parking import iter_stream_frames  # noqa: E402
-from stream import Backoff, StreamReader  # noqa: E402
+from stream import Backoff, FrameGrabber, Waiting  # noqa: E402
 
 
 def part(frame: bytes) -> bytes:
@@ -63,79 +62,82 @@ class FakeStream(io.BytesIO):
         super().close()
 
 
-class StreamReaderTests(unittest.TestCase):
-    def make(self, streams):
-        """Reader met een lijst van streams of fouten; wachten wordt alleen genoteerd."""
-        waits = []
+class FrameGrabberTests(unittest.TestCase):
+    def make(self, streams, now):
+        """Grabber met een lijst van streams of fouten en een klok die de test zet."""
         opened = []
-        done = threading.Event()
 
         def open_stream():
-            if not streams:
-                done.set()
-                reader.stop()
-                raise ValueError("klaar")
             item = streams.pop(0)
             opened.append(item)
             if isinstance(item, Exception):
                 raise item
             return item
 
-        def wait(seconds):
-            waits.append(seconds)
-            return done.is_set()
+        grabber = FrameGrabber(open_stream, Backoff(30, 120), clock=lambda: now[0])
+        return grabber, opened
 
-        reader = StreamReader(open_stream, Backoff(30, 120), clock=lambda: 100.0, wait=wait)
-        return reader, waits, opened
-
-    def test_keeps_newest_frame_and_skips_first(self):
-        stream = FakeStream(b"".join(part(jpeg(i)) for i in range(4)))
-        reader, waits, _ = self.make([stream])
-        reader.run()
-        self.assertEqual(reader.latest(), (jpeg(3), 100.0))
-
-    def test_waits_longer_after_each_failure(self):
-        reader, waits, _ = self.make([OSError("limiet"), OSError("limiet"), OSError("limiet"), OSError("limiet")])
-        reader.run()
-        self.assertEqual(waits, [30, 60, 120, 120])
-        self.assertIn("limiet", reader.error or "klaar")
-
-    def test_success_resets_the_wait(self):
-        good = FakeStream(part(jpeg(1)) + part(jpeg(2)))
-        reader, waits, _ = self.make([OSError("weg"), OSError("weg"), good, OSError("weg")])
-        reader.run()
-        # na de gelukte verbinding begint de wachttijd opnieuw bij 30 s
-        self.assertEqual(waits[:4], [30, 60, 30, 60])
-
-    def test_closes_the_stream(self):
+    def test_skips_first_frame_and_closes_the_stream(self):
         FakeStream.closed_count = 0
-        reader, _, _ = self.make([FakeStream(part(jpeg(1)) + part(jpeg(2)))])
-        reader.run()
+        stream = FakeStream(b"".join(part(jpeg(i)) for i in range(4)))
+        grabber, _ = self.make([stream], [100.0])
+        self.assertEqual(grabber.grab(), jpeg(1))
         self.assertEqual(FakeStream.closed_count, 1)
 
-    def test_one_connection_for_many_frames(self):
-        stream = FakeStream(b"".join(part(jpeg(i)) for i in range(50)))
-        reader, _, opened = self.make([stream])
-        reader.run()
-        self.assertEqual(opened.count(stream), 1)
-        self.assertEqual(reader.latest()[0], jpeg(49))
+    def test_new_connection_per_grab(self):
+        first = FakeStream(part(jpeg(1)) + part(jpeg(2)))
+        second = FakeStream(part(jpeg(3)) + part(jpeg(4)))
+        grabber, opened = self.make([first, second], [100.0])
+        self.assertEqual([grabber.grab(), grabber.grab()], [jpeg(2), jpeg(4)])
+        self.assertEqual(opened, [first, second])
+        self.assertTrue(first.closed and second.closed)
 
-    def test_reconnect_request_closes_and_reopens(self):
-        holder = {}
+    def test_closes_the_stream_when_reading_fails(self):
+        FakeStream.closed_count = 0
+        broken = FakeStream(part(jpeg(1)))  # maar één beeld, het eerste wordt overgeslagen
+        grabber, _ = self.make([broken], [100.0])
+        with self.assertRaises(ValueError):
+            grabber.grab()
+        self.assertEqual(FakeStream.closed_count, 1)
 
-        class Frozen(FakeStream):
-            def read1(self, size=-1):
-                holder["reader"].reconnect()  # zoals de meetlus doet bij een bevroren beeld
-                return super().read1(size)
+    def test_waits_longer_after_each_failure(self):
+        now = [100.0]
+        grabber, opened = self.make([OSError("limiet")] * 4, now)
+        waits = []
+        for _ in range(4):
+            with self.assertRaises(OSError):
+                grabber.grab()
+            waits.append(grabber.retry_at - now[0])
+            now[0] = grabber.retry_at
+        self.assertEqual(waits, [30, 60, 120, 120])
+        self.assertEqual(len(opened), 4)
 
-        first = Frozen(b"".join(part(jpeg(i)) for i in range(5)))
-        second = FakeStream(part(jpeg(7)) + part(jpeg(8)))
-        reader, waits, opened = self.make([first, second])
-        holder["reader"] = reader
-        reader.run()
-        self.assertEqual(opened[:2], [first, second])
-        self.assertTrue(first.closed)
-        self.assertEqual(reader.latest()[0], jpeg(8))
+    def test_no_new_attempt_while_waiting(self):
+        now = [100.0]
+        grabber, opened = self.make([OSError("limiet")], now)
+        with self.assertRaises(OSError):
+            grabber.grab()
+        now[0] = 120.0  # nog 10 s te wachten
+        with self.assertRaises(Waiting) as caught:
+            grabber.grab()
+        self.assertIn("limiet", str(caught.exception))
+        self.assertEqual(len(opened), 1)
+
+    def test_success_resets_the_wait(self):
+        now = [100.0]
+        good = FakeStream(part(jpeg(1)) + part(jpeg(2)))
+        grabber, _ = self.make([OSError("weg"), OSError("weg"), good, OSError("weg")], now)
+        for _ in range(2):
+            with self.assertRaises(OSError):
+                grabber.grab()
+            now[0] = grabber.retry_at
+        self.assertEqual(grabber.grab(), jpeg(2))
+        self.assertIsNone(grabber.retry_at)
+        with self.assertRaises(OSError):
+            grabber.grab()
+        # na het gelukte beeld begint de wachttijd opnieuw bij 30 s
+        self.assertEqual(grabber.retry_at - now[0], 30)
+
 
 if __name__ == "__main__":
     unittest.main()

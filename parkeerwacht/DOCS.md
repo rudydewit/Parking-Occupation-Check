@@ -43,12 +43,12 @@ laatste wisselingen.
   afstand doorgerekend, dus minder nauwkeurig.
 - Bij een te donker beeld blijft de laatste status staan. Zonder camerabeeld wordt
   de sensor `unavailable`, nooit onterecht "vrij".
-- De add-on houdt één verbinding met de camerastream open. Elke controle gebruikt
-  het nieuwste beeld daaruit. Valt de stream weg, dan volgt een nieuwe poging na
-  30 s, 1, 2, 4, 8 en 16 minuten en daarna elke 30 minuten. Elke poging staat in
-  het logboek, met een regel zodra de stream weer loopt.
-- Home Assistant zet het camerabeeld zolang de verbinding openstaat om naar MJPEG.
-  Dat kost wat rekenkracht van Home Assistant zelf.
+- De add-on opent elke controle kort de camerastream, neemt één vers beeld en
+  sluit de verbinding weer. Mislukt dat, dan volgt een nieuwe poging pas na 30 s,
+  1, 2, 4, 8 en 16 minuten en daarna elke 30 minuten. Elke poging staat in het
+  logboek, met een regel zodra het weer lukt.
+- Een vaste, doorlopende stream (versie 0.3.0) liet het geheugen van Home
+  Assistant oplopen tot de Pi vastliep. Daarom is daar weer van afgestapt.
 - De laatste 50 wisselfoto's staan lokaal in de add-on en worden daarna overschreven.
   Ze tonen ook de straat en de buren, en gaan dus mee in je back-ups.
 

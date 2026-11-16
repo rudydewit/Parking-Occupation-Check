@@ -16,13 +16,12 @@ from PIL import Image
 
 import web
 from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, stream_token
-from stream import StreamReader
+from stream import FrameGrabber, Waiting
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
 HISTORY_LIMIT = 50
 MAX_FAILURES = 3
-MAX_FRAME_AGE = 30  # seconden; ouder beeld telt als geen beeld
 STATUS_TOPIC = "parkeerwacht/status"
 STATE_TOPIC = "parkeerwacht/bezet"
 ATTRIBUTES_TOPIC = "parkeerwacht/attributes"
@@ -144,7 +143,7 @@ class Mqtt:
 
 
 def open_camera_stream(camera: str, core_url: str):
-    """Opent de MJPEG-stream van de camera; de StreamReader houdt hem open.
+    """Opent de MJPEG-stream van de camera; de FrameGrabber leest één beeld en sluit hem.
 
     camera_proxy kan een oud beeld geven (TP-Link: tot 5 minuten), de stream niet.
     Niet via de Supervisor: die leest een antwoord eerst helemaal in, en deze stream stopt nooit.
@@ -174,12 +173,7 @@ def run() -> None:
     detector = Detector("yolox_tiny.onnx")
     tracker = OccupancyTracker(options["confirm_occupied"], options["confirm_free"])
     broker = Mqtt()
-    reader = StreamReader(lambda: open_camera_stream(options["camera_entity"], options["core_url"])).start()
-    used_frame_time = 0.0
-    for _ in range(30):  # eerste beeld afwachten, anders begint de eerste controle met een fout
-        if reader.latest()[0] is not None:
-            break
-        time.sleep(1)
+    grabber = FrameGrabber(lambda: open_camera_stream(options["camera_entity"], options["core_url"]))
     failures = 0
     last_error = None
     checks = 0
@@ -189,14 +183,11 @@ def run() -> None:
     while True:
         started = time.monotonic()
         try:
-            raw, frame_time = reader.latest()
-            age = time.monotonic() - frame_time
-            if raw is None or frame_time <= used_frame_time or age > MAX_FRAME_AGE:
-                raise ValueError(f"geen nieuw camerabeeld ({reader.error or 'stream levert niets'})")
-            used_frame_time = frame_time
+            grab_started = time.monotonic()
+            raw = grabber.grab()
+            grab_seconds = time.monotonic() - grab_started
             with shared.lock:
                 if raw == shared.raw_jpeg:
-                    reader.reconnect()
                     raise ValueError("camera geeft hetzelfde beeld als de vorige keer")
             image = Image.open(io.BytesIO(raw)).convert("RGB")
             detect_started = time.monotonic()
@@ -204,8 +195,8 @@ def run() -> None:
             checks += 1
             if checks <= 5 or checks % 60 == 0:
                 log.info(
-                    "Controle %s: beeld %.1f s oud, herkenning %.2f s, vrij %.1f m",
-                    checks, age, time.monotonic() - detect_started, reading.free,
+                    "Controle %s: beeld ophalen %.1f s, herkenning %.2f s, vrij %.1f m",
+                    checks, grab_seconds, time.monotonic() - detect_started, reading.free,
                 )
             changed = tracker.update(reading.occupied)
             annotated = to_jpeg(annotate(image, ruler, zone, reading))
@@ -233,7 +224,9 @@ def run() -> None:
                 attributes_sent = attributes
         except Exception as err:  # meetlus moet blijven draaien, ook als de camera wegvalt
             failures += 1
-            if str(err) != last_error:  # een lange storing niet elke minuut opnieuw melden
+            if isinstance(err, Waiting):
+                pass  # de grabber logt elke echte poging zelf, met de wachttijd tot de volgende
+            elif str(err) != last_error:  # een lange storing niet elke minuut opnieuw melden
                 log.warning("Controle mislukt: %s", err)
                 last_error = str(err)
             if failures >= MAX_FAILURES:

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Terug naar per controle een kort camerabeeld: de add-on opent de stream, leest
+  één vers beeld en sluit de verbinding direct. De vaste stream van 0.3.0 liet het
+  geheugen van Home Assistant Core met ongeveer 1 % per uur oplopen, tot de Pi
+  vastliep (15 november 2026). Met Parkeerwacht uit bleef het geheugen vlak.
+- De oplopende wachttijd van 0.3.0 blijft: mislukt een beeld, dan volgt de
+  volgende poging pas na 30 s, 1, 2, 4, 8, 16 en daarna elke 30 minuten. Zo raakt
+  de camera bij een storing niet vol met nieuwe sessies. Tussendoor slaan de
+  controles over zonder de camera aan te spreken.
+- Het logboek toont per controle hoe lang het ophalen van het beeld duurde.
+
 ## 0.3.0
 
 - Eén vaste verbinding met de camerastream in plaats van elke controle een nieuwe.
