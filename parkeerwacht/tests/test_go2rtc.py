@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 
-from go2rtc import STREAM, Go2rtc, config, mask, write_config  # noqa: E402
+from go2rtc import STORM_ERRORS, STREAM, Go2rtc, config, mask, write_config  # noqa: E402
 from stream import Backoff, FrameGrabber  # noqa: E402
 
 JPEG = b"\xff\xd8beeld\xff\xd9"
@@ -59,6 +59,17 @@ class FakeApi(BaseHTTPRequestHandler):
             return
         FakeApi.preloads[query["src"][0]] = {"query": "video"}
         self._reply(200)
+
+
+    def do_DELETE(self):
+        url = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(url.query, keep_blank_values=True)
+        FakeApi.requests.append(("DELETE", url.path, query))
+        FakeApi.preloads.pop(query["src"][0], None)
+        self._reply(200)
+
+
+EOF_LINE = f"18:17:46.686 WRN github.com/AlexxIT/go2rtc/internal/streams/producer.go:170 > error=EOF url={URL}"
 
 
 class ApiTests(unittest.TestCase):
@@ -125,13 +136,62 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(grabber.retry_at)
 
 
+    def test_reconnect_storm_stops_the_fixed_connection(self):
+        now = [100.0]
+        self.camera._clock = lambda: now[0]
+        self.assertEqual(self.camera.frame(), JPEG)
+        with self.assertLogs("parkeerwacht", logging.INFO) as logs:
+            for i in range(STORM_ERRORS * 3):
+                now[0] += 0.05
+                self.camera._on_line(EOF_LINE)
+        self.assertNotIn(STREAM, FakeApi.preloads)
+        text = "\n".join(logs.output)
+        self.assertIn("verbreekt de verbinding steeds (EOF)", text)
+        self.assertIn("over 2 min", text)
+        self.assertNotIn("geheim", text)
+        # tijdens de wachttijd spreekt de add-on de camera niet aan
+        puts = len([r for r in FakeApi.requests if r[0] == "PUT"])
+        with self.assertRaises(ConnectionError) as caught:
+            self.camera.frame()
+        self.assertIn("nieuwe poging over", str(caught.exception))
+        self.assertEqual(len([r for r in FakeApi.requests if r[0] == "PUT"]), puts)
+        # daarna wel weer, en een goed beeld zet de wachttijd terug
+        now[0] += 121
+        self.assertEqual(self.camera.frame(), JPEG)
+        self.assertEqual(self.camera.cooldown.attempts, 0)
+
+    def test_storms_wait_longer_each_time(self):
+        now = [100.0]
+        self.camera._clock = lambda: now[0]
+        waits = []
+        for _ in range(3):
+            with self.assertLogs("parkeerwacht", logging.WARNING):
+                for _ in range(STORM_ERRORS):
+                    now[0] += 0.05
+                    self.camera._on_line(EOF_LINE)
+            waits.append(round(self.camera.paused_until - now[0]))
+            now[0] = self.camera.paused_until + 1
+        self.assertEqual(waits, [120, 240, 480])
+
+    def test_occasional_drops_are_no_storm(self):
+        now = [100.0]
+        self.camera._clock = lambda: now[0]
+        self.camera.frame()
+        with self.assertLogs("parkeerwacht", logging.INFO):
+            for _ in range(STORM_ERRORS * 2):
+                now[0] += 5
+                self.camera._on_line(EOF_LINE)
+        self.assertIn(STREAM, FakeApi.preloads)
+        self.assertIsNone(self.camera.paused_until)
+
+
 class ConfigTests(unittest.TestCase):
     def test_only_the_api_on_localhost(self):
         cfg = config(URL)
         self.assertEqual(cfg["api"]["listen"], "127.0.0.1:1984")
         for server in ("rtsp", "webrtc", "srtp"):
             self.assertEqual(cfg[server]["listen"], "")
-        self.assertEqual(cfg["streams"], {STREAM: [URL]})
+        self.assertEqual(cfg["streams"], {STREAM: [URL + "#backchannel=0"]})
         self.assertEqual(cfg["preload"], {STREAM: "video"})
 
     def test_config_file_is_private(self):
@@ -139,7 +199,7 @@ class ConfigTests(unittest.TestCase):
             path = Path(folder) / "go2rtc.yaml"
             write_config(path, URL)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(json.loads(path.read_text())["streams"][STREAM], [URL])
+            self.assertEqual(json.loads(path.read_text())["streams"][STREAM], [URL + "#backchannel=0"])
 
     def test_mask(self):
         self.assertEqual(mask(f"error url={URL}"), "error url=rtsp://****@192.168.2.50:554/stream1")

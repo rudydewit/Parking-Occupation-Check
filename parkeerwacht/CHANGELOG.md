@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2
+
+- Beveiliging tegen snel herhaald verbinden: verbreekt de camera de verbinding
+  5 keer binnen 10 seconden, dan stopt de add-on de vaste verbinding en probeert
+  hij het pas na 2, 4, 8, 16 en daarna elke 30 minuten opnieuw. Op 17 november
+  2026 sloot de Tapo elke verbinding direct (EOF) en verbond go2rtc zo'n 20 keer
+  per seconde opnieuw.
+- Geen tweerichtingsaudio meer aanvragen bij de camera (`#backchannel=0`), tenzij
+  `rtsp_url` zelf al een `#` met opties bevat.
+
 ## 0.5.1
 
 - Bij het starten wacht de add-on tot go2rtc antwoordt, zodat de eerste controle
