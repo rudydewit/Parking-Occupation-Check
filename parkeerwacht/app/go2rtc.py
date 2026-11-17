@@ -46,6 +46,17 @@ def mask(text: str) -> str:
     return re.sub(r"(Authorization:\s*\w+)\s+[^\r\n]*", r"\1 ****", text, flags=re.I)
 
 
+def describe_login(rtsp_url: str) -> str:
+    """Lengte van gebruikersnaam en wachtwoord, om een tikfout te vinden zonder ze te tonen."""
+    parts = urllib.parse.urlsplit(rtsp_url.split("#", 1)[0])
+    user, password = parts.username or "", parts.password or ""
+    plain = all(c.isascii() and c.isalnum() for c in user + password)
+    return (
+        f"gebruikersnaam {len(user)} tekens, wachtwoord {len(password)} tekens"
+        + ("" if plain else ", met andere tekens dan letters en cijfers")
+    )
+
+
 def source(rtsp_url: str, via: str = "rtsp") -> str:
     """Bron voor go2rtc.
 

@@ -16,7 +16,7 @@ from PIL import Image
 
 import web
 from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, stream_token
-from go2rtc import Go2rtc, mask
+from go2rtc import Go2rtc, describe_login, mask
 from stream import Backoff, FrameGrabber, Waiting
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
@@ -181,7 +181,7 @@ def run() -> None:
         camera = Go2rtc(rtsp_url, trace=options.get("go2rtc_trace", False), via=options.get("go2rtc_source", "rtsp"))
         camera.start()
         grabber = FrameGrabber(fetch=camera.frame, backoff=Backoff(30, 120))
-        source = f"go2rtc via {camera.via} ({mask(rtsp_url)})"
+        source = f"go2rtc via {camera.via} ({mask(rtsp_url)}; {describe_login(rtsp_url)})"
     else:
         log.warning(
             "Geen rtsp_url ingesteld: beeld via Home Assistant, zoals in 0.4.0. "

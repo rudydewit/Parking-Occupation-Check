@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.5
+
+- Bij het starten staat in het logboek hoeveel tekens de gebruikersnaam en het
+  wachtwoord in `rtsp_url` hebben, en of er andere tekens dan letters en cijfers in
+  staan. Zo is een tikfout te vinden zonder dat de gegevens zelf in het logboek
+  komen.
+
 ## 0.5.4
 
 - De vaste verbinding zet nu video én audio op. De Tapo C325WB sloot de

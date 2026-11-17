@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 
-from go2rtc import STORM_ERRORS, STREAM, Go2rtc, config, mask, write_config  # noqa: E402
+from go2rtc import STORM_ERRORS, STREAM, Go2rtc, config, describe_login, mask, write_config  # noqa: E402
 from stream import Backoff, FrameGrabber  # noqa: E402
 
 JPEG = b"\xff\xd8beeld\xff\xd9"
@@ -213,6 +213,11 @@ class ConfigTests(unittest.TestCase):
     def test_trace_only_when_asked(self):
         self.assertEqual(config(URL)["log"], {"level": "info"})
         self.assertEqual(config(URL, trace=True)["log"]["rtsp"], "trace")
+
+    def test_describe_login(self):
+        self.assertEqual(describe_login(URL), "gebruikersnaam 7 tekens, wachtwoord 6 tekens")
+        self.assertIn("andere tekens", describe_login("rtsp://a:b%40c@1.2.3.4/stream1"))
+        self.assertNotIn("geheim", describe_login(URL))
 
     def test_mask(self):
         self.assertEqual(mask(f"error url={URL}"), "error url=rtsp://****@192.168.2.50:554/stream1")
