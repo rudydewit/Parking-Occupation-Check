@@ -41,8 +41,9 @@ STORM_SECONDS = 10.0
 
 
 def mask(text: str) -> str:
-    """Haalt gebruikersnaam en wachtwoord uit adressen, voor het logboek."""
-    return re.sub(r"(\w+://)[^/@\s]+@", r"\1****@", text)
+    """Haalt gebruikersnaam, wachtwoord en inloggegevens uit regels, voor het logboek."""
+    text = re.sub(r"(\w+://)[^/@\s]+@", r"\1****@", text)
+    return re.sub(r"(Authorization:\s*\w+)\s+[^\r\n]*", r"\1 ****", text, flags=re.I)
 
 
 def source(rtsp_url: str) -> str:
@@ -50,22 +51,23 @@ def source(rtsp_url: str) -> str:
     return rtsp_url if "#" in rtsp_url else rtsp_url + "#backchannel=0"
 
 
-def config(rtsp_url: str, api: str = API) -> dict:
+def config(rtsp_url: str, api: str = API, trace: bool = False) -> dict:
     """go2rtc-instellingen: alleen de API op localhost, geen andere poorten naar buiten."""
     return {
         "api": {"listen": api},
         "rtsp": {"listen": ""},
         "webrtc": {"listen": ""},
         "srtp": {"listen": ""},
-        "log": {"level": "info"},
+        # trace toont het RTSP-gesprek met de camera, om een weigerende camera te onderzoeken
+        "log": {"level": "info", "rtsp": "trace", "streams": "trace"} if trace else {"level": "info"},
         "streams": {STREAM: [source(rtsp_url)]},
         "preload": {STREAM: "video"},
     }
 
 
-def write_config(path: Path, rtsp_url: str, api: str = API) -> None:
+def write_config(path: Path, rtsp_url: str, api: str = API, trace: bool = False) -> None:
     # YAML is een superset van JSON, dus go2rtc leest dit gewoon
-    path.write_text(json.dumps(config(rtsp_url, api), indent=2))
+    path.write_text(json.dumps(config(rtsp_url, api, trace), indent=2))
     path.chmod(0o600)
 
 
@@ -80,7 +82,9 @@ class Go2rtc:
         api: str = API,
         restart_delay: float = 10.0,
         command: Optional[Callable[[Path], List[str]]] = None,
+        trace: bool = False,
     ):
+        self.trace = trace
         self.rtsp_url = rtsp_url
         self.config_path = config_path
         self.api = api
@@ -98,7 +102,7 @@ class Go2rtc:
 
     def start(self, wait: float = 15.0) -> None:
         """Start go2rtc en wacht tot de API antwoordt, zodat de eerste controle niet te vroeg is."""
-        write_config(self.config_path, self.rtsp_url, self.api)
+        write_config(self.config_path, self.rtsp_url, self.api, self.trace)
         threading.Thread(target=self._supervise, daemon=True).start()
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
@@ -194,7 +198,7 @@ class Go2rtc:
         log.info("go2rtc: vaste verbinding met de camera gestart")
         self.paused_until = None
 
-    def frame(self, width: int = 1280, timeout: float = 30) -> bytes:
+    def frame(self, width: int = 1280, timeout: float = 15) -> bytes:
         """Eén vers JPEG-beeld uit de vaste verbinding."""
         self.ensure_preload()
         query = urllib.parse.urlencode({"src": STREAM, "width": width})

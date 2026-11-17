@@ -178,7 +178,7 @@ def run() -> None:
     if rtsp_url:
         # Eigen go2rtc met één vaste verbinding; die bouwt hij zelf opnieuw op, dus
         # een korte wachttijd tussen pogingen is genoeg
-        camera = Go2rtc(rtsp_url)
+        camera = Go2rtc(rtsp_url, trace=options.get("go2rtc_trace", False))
         camera.start()
         grabber = FrameGrabber(fetch=camera.frame, backoff=Backoff(30, 120))
         source = f"go2rtc ({mask(rtsp_url)})"

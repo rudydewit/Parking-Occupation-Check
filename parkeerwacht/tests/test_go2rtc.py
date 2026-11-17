@@ -201,6 +201,14 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(path.read_text())["streams"][STREAM], [URL + "#backchannel=0"])
 
+    def test_mask_hides_authorization(self):
+        self.assertEqual(mask("Authorization: Basic cGFya2VlcjpnZWhlaW0="), "Authorization: Basic ****")
+        self.assertEqual(mask('Authorization: Digest username="parkeer", response="ab"'), "Authorization: Digest ****")
+
+    def test_trace_only_when_asked(self):
+        self.assertEqual(config(URL)["log"], {"level": "info"})
+        self.assertEqual(config(URL, trace=True)["log"]["rtsp"], "trace")
+
     def test_mask(self):
         self.assertEqual(mask(f"error url={URL}"), "error url=rtsp://****@192.168.2.50:554/stream1")
         self.assertEqual(mask("rtsp://192.168.2.50/stream1"), "rtsp://192.168.2.50/stream1")

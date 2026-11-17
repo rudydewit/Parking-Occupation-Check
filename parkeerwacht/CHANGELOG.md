@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3
+
+- Optie `go2rtc_trace`: zet het volledige RTSP-gesprek tussen go2rtc en de camera
+  in het logboek, om te onderzoeken waarom een camera de verbinding sluit.
+  Inloggegevens worden weggepoetst. Alleen tijdelijk aanzetten.
+- Een beeld opvragen bij go2rtc geeft na 15 in plaats van 30 seconden op.
+
 ## 0.5.2
 
 - Beveiliging tegen snel herhaald verbinden: verbreekt de camera de verbinding
