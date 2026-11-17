@@ -11,6 +11,9 @@ Geschiedenis:
   verbinding direct. Valt het beeld weg, dan wacht de grabber steeds langer voor
   hij het opnieuw probeert, zodat de camera tijd krijgt om oude sessies op te
   ruimen en niet vol raakt.
+- 0.5.0 haalt het beeld standaard bij een eigen go2rtc (zie go2rtc.py), die één
+  vaste verbinding met de camera openhoudt. De FrameGrabber krijgt dan een
+  fetch-functie in plaats van een stream; de wachttijd werkt hetzelfde.
 """
 from __future__ import annotations
 
@@ -55,15 +58,20 @@ class FrameGrabber:
 
     open_stream geeft een bestand-achtig object met read1 (zoals urlopen) en moet
     een time-out hebben, zodat een stilgevallen stream een fout geeft.
+    Of geef fetch: een functie die zelf één JPEG-beeld teruggeeft (go2rtc).
     """
 
     def __init__(
         self,
-        open_stream: Callable[[], object],
+        open_stream: Optional[Callable[[], object]] = None,
         backoff: Optional[Backoff] = None,
         clock: Callable[[], float] = time.monotonic,
+        fetch: Optional[Callable[[], bytes]] = None,
     ):
+        if (open_stream is None) == (fetch is None):
+            raise ValueError("geef open_stream of fetch")
         self._open = open_stream
+        self._fetch = fetch or self._from_stream
         self.backoff = backoff or Backoff()
         self._clock = clock
         self.error: Optional[str] = None
@@ -76,13 +84,7 @@ class FrameGrabber:
         if self.retry_at is not None and now < self.retry_at:
             raise Waiting(f"{self.error}; volgende poging over {duration(self.retry_at - now)}")
         try:
-            stream = self._open()
-            try:
-                frame = read_stream_frame(stream, skip=1)  # het eerste beeld kan onvolledig of oud zijn
-            finally:
-                close = getattr(stream, "close", None)
-                if close:
-                    close()
+            frame = self._fetch()
         except Exception as err:
             wait = self.backoff.next()
             self.error = str(err)
@@ -99,3 +101,12 @@ class FrameGrabber:
         self.retry_at = None
         self.grabs += 1
         return frame
+
+    def _from_stream(self) -> bytes:
+        stream = self._open()
+        try:
+            return read_stream_frame(stream, skip=1)  # het eerste beeld kan onvolledig of oud zijn
+        finally:
+            close = getattr(stream, "close", None)
+            if close:
+                close()

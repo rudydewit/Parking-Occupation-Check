@@ -18,7 +18,8 @@ laatste wisselingen.
 
 | Optie | Standaard | Uitleg |
 |---|---|---|
-| `camera_entity` | `camera.tapo_woning_voor_live_view` | Camera in Home Assistant |
+| `rtsp_url` | leeg | RTSP-adres van de camera, met camera-account, bijvoorbeeld `rtsp://gebruiker:wachtwoord@192.168.2.50:554/stream1` |
+| `camera_entity` | `camera.tapo_woning_voor_live_view` | Camera in Home Assistant, alleen gebruikt als `rtsp_url` leeg is |
 | `core_url` | `http://homeassistant:8123` | Intern adres van Home Assistant |
 | `interval_seconds` | `60` | Tijd tussen twee controles |
 | `min_confidence` | `0.35` | Hoe zeker het model moet zijn dat het een voertuig is |
@@ -28,6 +29,26 @@ laatste wisselingen.
 | `min_free_m` | `4.5` | Zoveel meter moet aaneengesloten vrij zijn om `vrij` te melden |
 | `confirm_occupied` | `2` | Aantal metingen op rij voordat de plek bezet wordt |
 | `confirm_free` | `3` | Aantal metingen op rij voordat de plek vrij wordt |
+
+## Camera-adres (`rtsp_url`)
+
+Bij een Tapo-camera maak je in de Tapo-app een camera-account aan: camera openen,
+**Instellingen > Geavanceerde instellingen > Camera-account**. Dat is hetzelfde
+account dat de TP-Link-integratie in Home Assistant voor live beeld gebruikt; heb je
+het daar al ingevuld, dan kun je dat hergebruiken. Het adres wordt dan
+`rtsp://gebruiker:wachtwoord@IP-adres:554/stream1`. Bevat het wachtwoord tekens als
+`@`, `:` of `/`, schrijf die dan als `%40`, `%3A` en `%2F`.
+
+De add-on start daarmee een eigen go2rtc, die één vaste verbinding met de camera
+openhoudt en die na een storing zelf opnieuw opbouwt. Een controle vraagt één beeld
+bij go2rtc op en spreekt de camera dus niet opnieuw aan. go2rtc luistert alleen
+binnen de add-on; er komen geen nieuwe poorten op je netwerk. In het logboek staat
+het adres zonder gebruikersnaam en wachtwoord.
+
+Laat je `rtsp_url` leeg, dan haalt de add-on het beeld via Home Assistant, zoals
+tot en met 0.4.0. Home Assistant start dan voor elk beeld een ffmpeg-proces dat bij
+de Tapo-camera niet netjes afsluit, en na ongeveer een dag zat de camera daardoor
+vol (17 november 2026).
 
 ## Goed om te weten
 
@@ -43,12 +64,16 @@ laatste wisselingen.
   afstand doorgerekend, dus minder nauwkeurig.
 - Bij een te donker beeld blijft de laatste status staan. Zonder camerabeeld wordt
   de sensor `unavailable`, nooit onterecht "vrij".
-- De add-on opent elke controle kort de camerastream, neemt één vers beeld en
-  sluit de verbinding weer. Mislukt dat, dan volgt een nieuwe poging pas na 30 s,
-  1, 2, 4, 8 en 16 minuten en daarna elke 30 minuten. Elke poging staat in het
-  logboek, met een regel zodra het weer lukt.
-- Een vaste, doorlopende stream (versie 0.3.0) liet het geheugen van Home
-  Assistant oplopen tot de Pi vastliep. Daarom is daar weer van afgestapt.
+- Mislukt een beeld via go2rtc, dan volgt een nieuwe poging na 30 s, 1 en daarna
+  elke 2 minuten. Via Home Assistant loopt de wachttijd op tot 30 minuten, zodat de
+  camera niet nog voller raakt. Elke poging staat in het logboek, met een regel
+  zodra het weer lukt.
+- De vaste verbinding van go2rtc is iets anders dan de vaste stream van 0.3.0: die
+  liet Home Assistant de video doorlopend omzetten, en daarbij liep het geheugen op
+  tot de Pi vastliep. go2rtc zet alleen het ene opgevraagde beeld om, binnen de
+  add-on.
+- Een camerakaart op een dashboard haalt zijn beelden nog steeds via Home
+  Assistant. Staat zo'n dashboard lang open, dan kan dat de camera alsnog vullen.
 - De laatste 50 wisselfoto's staan lokaal in de add-on en worden daarna overschreven.
   Ze tonen ook de straat en de buren, en gaan dus mee in je back-ups.
 

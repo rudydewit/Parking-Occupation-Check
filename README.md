@@ -17,10 +17,11 @@ bij die camerastand, dus op een andere plek moet je die opnieuw bepalen.
 Er staan geen vakken op straat, dus de add-on kijkt niet naar één vast vak maar naar
 de ruimte langs de stoeprand.
 
-1. De add-on opent elke 60 seconden kort de MJPEG-stream van Home Assistant, neemt
-   één vers beeld en sluit de verbinding weer. De gewone snapshot kan bij sommige
-   camera's minuten oud zijn. Mislukt het, dan wacht de add-on steeds langer
-   (30 s tot 30 minuten) voor een nieuwe poging, zodat de camera niet vol raakt.
+1. Een eigen [go2rtc](https://github.com/AlexxIT/go2rtc) in de add-on houdt één vaste
+   RTSP-verbinding met de camera open. Elke 60 seconden vraagt de add-on daar één
+   vers beeld op. De camera ziet zo altijd maar één verbinding, hoe vaak er ook
+   wordt gekeken. Zonder `rtsp_url` haalt de add-on het beeld zoals voorheen via
+   Home Assistant.
 2. YOLOX-Tiny herkent lokaal voertuigen. Er gaan geen beelden naar buiten.
 3. Een meetlat rekent elke auto tegen de stoeprand om naar een stuk stoeprand in
    meters. Die houdt rekening met de groothoeklens en het perspectief, en is
@@ -38,7 +39,8 @@ de status niet.
 
 - Home Assistant OS of Supervised (`aarch64` of `amd64`)
 - Mosquitto broker-add-on met de MQTT-integratie
-- Een camera-entiteit in Home Assistant
+- Een camera met RTSP (bij Tapo: een camera-account in de Tapo-app), of anders een
+  camera-entiteit in Home Assistant
 
 ## Installatie
 
@@ -48,7 +50,7 @@ de status niet.
 2. Kies rechtsboven **⋮ > Repositories** en voeg toe:
    `https://github.com/rudydewit/Parking-Occupation-Check`
 3. Installeer **Parkeerwacht**. De eerste build op een Raspberry Pi kan even duren.
-4. Controleer op het tabblad **Configuratie** de `camera_entity`.
+4. Vul op het tabblad **Configuratie** `rtsp_url` in (zie de documentatie van de add-on).
 5. Zet op het tabblad **Info** *Toon in zijbalk* en *Watchdog* aan.
 6. Start de add-on en kijk in het logboek of de controles lukken.
 

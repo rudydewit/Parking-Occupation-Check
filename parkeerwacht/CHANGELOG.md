@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+- Eigen go2rtc in de add-on, met één vaste RTSP-verbinding met de camera (nieuwe
+  optie `rtsp_url`). Een controle vraagt één beeld bij go2rtc op, zodat de camera
+  niet bij elke controle een nieuwe sessie krijgt. Met 0.4.0 startte Home Assistant
+  elke minuut een ffmpeg-proces dat niet netjes afsloot ("Timeout while waiting of
+  FFmpeg"), en na ongeveer 28 uur zat de Tapo weer vol (17 november 2026).
+- go2rtc bouwt de verbinding na een storing zelf opnieuw op. Valt go2rtc zelf weg,
+  dan start de add-on het opnieuw. Wachttijd tussen mislukte controles via go2rtc:
+  30 s, 1 en daarna 2 minuten.
+- go2rtc luistert alleen binnen de add-on. Het camera-adres staat in het logboek
+  zonder gebruikersnaam en wachtwoord.
+- Zonder `rtsp_url` werkt de add-on zoals 0.4.0, via Home Assistant.
+
 ## 0.4.0
 
 - Terug naar per controle een kort camerabeeld: de add-on opent de stream, leest

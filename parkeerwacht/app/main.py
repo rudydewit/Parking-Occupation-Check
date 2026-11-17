@@ -16,7 +16,8 @@ from PIL import Image
 
 import web
 from parking import ChargeZone, Detector, KerbRuler, OccupancyTracker, annotate, stream_token
-from stream import FrameGrabber, Waiting
+from go2rtc import Go2rtc, mask
+from stream import Backoff, FrameGrabber, Waiting
 
 DATA = Path(os.environ.get("PARKEERWACHT_DATA", "/data"))
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -173,12 +174,26 @@ def run() -> None:
     detector = Detector("yolox_tiny.onnx")
     tracker = OccupancyTracker(options["confirm_occupied"], options["confirm_free"])
     broker = Mqtt()
-    grabber = FrameGrabber(lambda: open_camera_stream(options["camera_entity"], options["core_url"]))
+    rtsp_url = (options.get("rtsp_url") or "").strip()
+    if rtsp_url:
+        # Eigen go2rtc met één vaste verbinding; die bouwt hij zelf opnieuw op, dus
+        # een korte wachttijd tussen pogingen is genoeg
+        camera = Go2rtc(rtsp_url)
+        camera.start()
+        grabber = FrameGrabber(fetch=camera.frame, backoff=Backoff(30, 120))
+        source = f"go2rtc ({mask(rtsp_url)})"
+    else:
+        log.warning(
+            "Geen rtsp_url ingesteld: beeld via Home Assistant, zoals in 0.4.0. "
+            "Daarbij kan de Tapo-camera vol raken; zie de documentatie."
+        )
+        grabber = FrameGrabber(lambda: open_camera_stream(options["camera_entity"], options["core_url"]))
+        source = options["camera_entity"]
     failures = 0
     last_error = None
     checks = 0
     attributes_sent = None
-    log.info("Gestart, camera %s, elke %s s", options["camera_entity"], options["interval_seconds"])
+    log.info("Gestart, beeld via %s, elke %s s", source, options["interval_seconds"])
 
     while True:
         started = time.monotonic()
