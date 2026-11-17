@@ -75,9 +75,18 @@ class Go2rtc:
         self._process: Optional[subprocess.Popen] = None
         self._stopping = False
 
-    def start(self) -> None:
+    def start(self, wait: float = 15.0) -> None:
+        """Start go2rtc en wacht tot de API antwoordt, zodat de eerste controle niet te vroeg is."""
         write_config(self.config_path, self.rtsp_url, self.api)
         threading.Thread(target=self._supervise, daemon=True).start()
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                self._get("/api", timeout=2)
+                return
+            except OSError:
+                time.sleep(0.2)
+        log.warning("go2rtc antwoordt na %.0f s nog niet", wait)
 
     def stop(self) -> None:
         self._stopping = True

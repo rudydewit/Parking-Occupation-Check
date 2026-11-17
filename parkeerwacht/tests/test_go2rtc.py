@@ -157,7 +157,7 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             camera = Go2rtc(URL, config_path=Path(folder) / "go2rtc.yaml", restart_delay=0.05, command=command)
             with self.assertLogs("parkeerwacht", logging.INFO) as logs:
-                camera.start()
+                camera.start(wait=0)
                 deadline = time.monotonic() + 5
                 while len(runs) < 2 and time.monotonic() < deadline:
                     time.sleep(0.02)

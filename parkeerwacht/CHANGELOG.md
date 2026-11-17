@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Bij het starten wacht de add-on tot go2rtc antwoordt, zodat de eerste controle
+  niet mislukt met "Connection refused".
+
 ## 0.5.0
 
 - Eigen go2rtc in de add-on, met één vaste RTSP-verbinding met de camera (nieuwe
