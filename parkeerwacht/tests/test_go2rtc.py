@@ -94,7 +94,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.camera.frame(), JPEG)
         puts = [r for r in FakeApi.requests if r[0] == "PUT"]
         self.assertEqual(len(puts), 1)
-        self.assertEqual(puts[0][2], {"src": [STREAM], "video": [""]})
+        self.assertEqual(puts[0][2], {"src": [STREAM], "video": [""], "audio": [""]})
 
     def test_asks_for_the_frame_in_1280_wide(self):
         self.camera.frame()
@@ -189,10 +189,15 @@ class ConfigTests(unittest.TestCase):
     def test_only_the_api_on_localhost(self):
         cfg = config(URL)
         self.assertEqual(cfg["api"]["listen"], "127.0.0.1:1984")
-        for server in ("rtsp", "webrtc", "srtp"):
+        self.assertEqual(cfg["rtsp"]["listen"], "127.0.0.1:8554")
+        for server in ("webrtc", "srtp"):
             self.assertEqual(cfg[server]["listen"], "")
         self.assertEqual(cfg["streams"], {STREAM: [URL + "#backchannel=0"]})
-        self.assertEqual(cfg["preload"], {STREAM: "video"})
+        self.assertEqual(cfg["preload"], {STREAM: "video&audio"})
+
+    def test_ffmpeg_source(self):
+        cfg = config(URL, via="ffmpeg")
+        self.assertEqual(cfg["streams"], {STREAM: [f"ffmpeg:{URL}#video=copy#audio=copy"]})
 
     def test_config_file_is_private(self):
         with tempfile.TemporaryDirectory() as folder:

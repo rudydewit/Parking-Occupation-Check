@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.4
+
+- De vaste verbinding zet nu video én audio op. De Tapo C325WB sloot de
+  verbinding direct na PLAY als alleen het videospoor was opgezet; de trace van
+  0.5.3 liet dat zien.
+- Optie `go2rtc_source`: `rtsp` (standaard, go2rtc verbindt zelf) of `ffmpeg`
+  (één doorlopend ffmpeg-proces verbindt, zoals Home Assistant doet; video wordt
+  alleen doorgegeven). Daarvoor luistert de RTSP-server van go2rtc nu op
+  127.0.0.1:8554, alleen binnen de add-on.
+
 ## 0.5.3
 
 - Optie `go2rtc_trace`: zet het volledige RTSP-gesprek tussen go2rtc en de camera

@@ -46,28 +46,40 @@ def mask(text: str) -> str:
     return re.sub(r"(Authorization:\s*\w+)\s+[^\r\n]*", r"\1 ****", text, flags=re.I)
 
 
-def source(rtsp_url: str) -> str:
-    """Zonder tweerichtingsaudio: daar hebben we niets aan, en sommige camera's slaan erop af."""
+def source(rtsp_url: str, via: str = "rtsp") -> str:
+    """Bron voor go2rtc.
+
+    rtsp: go2rtc verbindt zelf, zonder tweerichtingsaudio (daar hebben we niets aan,
+    en sommige camera's slaan erop af).
+    ffmpeg: go2rtc laat één doorlopend ffmpeg-proces verbinden, zoals Home Assistant
+    dat doet; de video wordt alleen doorgegeven, niet opnieuw gecodeerd.
+    """
+    if via == "ffmpeg":
+        return f"ffmpeg:{rtsp_url}#video=copy#audio=copy"
     return rtsp_url if "#" in rtsp_url else rtsp_url + "#backchannel=0"
 
 
-def config(rtsp_url: str, api: str = API, trace: bool = False) -> dict:
+def config(rtsp_url: str, api: str = API, trace: bool = False, via: str = "rtsp") -> dict:
     """go2rtc-instellingen: alleen de API op localhost, geen andere poorten naar buiten."""
     return {
         "api": {"listen": api},
-        "rtsp": {"listen": ""},
+        # ffmpeg levert zijn stream via RTSP aan go2rtc af, dus die luistert wel, maar
+        # alleen binnen de add-on
+        "rtsp": {"listen": "127.0.0.1:8554"},
         "webrtc": {"listen": ""},
         "srtp": {"listen": ""},
         # trace toont het RTSP-gesprek met de camera, om een weigerende camera te onderzoeken
         "log": {"level": "info", "rtsp": "trace", "streams": "trace"} if trace else {"level": "info"},
-        "streams": {STREAM: [source(rtsp_url)]},
-        "preload": {STREAM: "video"},
+        "streams": {STREAM: [source(rtsp_url, via)]},
+        # video én audio: de Tapo C325WB sluit de verbinding direct na PLAY als
+        # alleen het videospoor is opgezet (17 november 2026)
+        "preload": {STREAM: "video&audio"},
     }
 
 
-def write_config(path: Path, rtsp_url: str, api: str = API, trace: bool = False) -> None:
+def write_config(path: Path, rtsp_url: str, api: str = API, trace: bool = False, via: str = "rtsp") -> None:
     # YAML is een superset van JSON, dus go2rtc leest dit gewoon
-    path.write_text(json.dumps(config(rtsp_url, api, trace), indent=2))
+    path.write_text(json.dumps(config(rtsp_url, api, trace, via), indent=2))
     path.chmod(0o600)
 
 
@@ -83,8 +95,10 @@ class Go2rtc:
         restart_delay: float = 10.0,
         command: Optional[Callable[[Path], List[str]]] = None,
         trace: bool = False,
+        via: str = "rtsp",
     ):
         self.trace = trace
+        self.via = via
         self.rtsp_url = rtsp_url
         self.config_path = config_path
         self.api = api
@@ -102,7 +116,7 @@ class Go2rtc:
 
     def start(self, wait: float = 15.0) -> None:
         """Start go2rtc en wacht tot de API antwoordt, zodat de eerste controle niet te vroeg is."""
-        write_config(self.config_path, self.rtsp_url, self.api, self.trace)
+        write_config(self.config_path, self.rtsp_url, self.api, self.trace, self.via)
         threading.Thread(target=self._supervise, daemon=True).start()
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
@@ -188,7 +202,7 @@ class Go2rtc:
         preloads = json.loads(self._get("/api/preload", timeout=5) or b"{}")
         if STREAM in preloads:
             return
-        query = urllib.parse.urlencode({"src": STREAM, "video": ""})
+        query = urllib.parse.urlencode({"src": STREAM, "video": "", "audio": ""})
         request = urllib.request.Request(f"http://{self.api}/api/preload?{query}", method="PUT")
         try:
             with urllib.request.urlopen(request, timeout=30):

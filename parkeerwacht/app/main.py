@@ -178,10 +178,10 @@ def run() -> None:
     if rtsp_url:
         # Eigen go2rtc met één vaste verbinding; die bouwt hij zelf opnieuw op, dus
         # een korte wachttijd tussen pogingen is genoeg
-        camera = Go2rtc(rtsp_url, trace=options.get("go2rtc_trace", False))
+        camera = Go2rtc(rtsp_url, trace=options.get("go2rtc_trace", False), via=options.get("go2rtc_source", "rtsp"))
         camera.start()
         grabber = FrameGrabber(fetch=camera.frame, backoff=Backoff(30, 120))
-        source = f"go2rtc ({mask(rtsp_url)})"
+        source = f"go2rtc via {camera.via} ({mask(rtsp_url)})"
     else:
         log.warning(
             "Geen rtsp_url ingesteld: beeld via Home Assistant, zoals in 0.4.0. "

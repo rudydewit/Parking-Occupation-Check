@@ -1,5 +1,5 @@
 name: Parkeerwacht
-version: "0.5.3"
+version: "0.5.4"
 slug: parkeerwacht
 description: Ziet via de camera of er voor de deur plek is om te parkeren en te laden
 arch:
@@ -18,6 +18,7 @@ panel_icon: mdi:car-electric
 panel_title: Parkeerwacht
 options:
   rtsp_url: ""
+  go2rtc_source: rtsp
   go2rtc_trace: false
   camera_entity: camera.tapo_woning_voor_live_view
   core_url: http://homeassistant:8123
@@ -31,6 +32,7 @@ options:
   confirm_free: 3
 schema:
   rtsp_url: password?
+  go2rtc_source: list(rtsp|ffmpeg)
   go2rtc_trace: bool
   camera_entity: str
   core_url: url
